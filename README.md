@@ -7,7 +7,7 @@ translated to C++ ahead of time and runs on a reimplementation of the Wii U's sy
 > unpacked to `code/`, `content/`, `meta/`. The translated C++ and the program built from it contain the game's
 > code: do not share them. Not affiliated with or endorsed by Nintendo.
 
-## Status (19 November 2026): menus work, a match does not start
+## Status (19 November 2026, later): menus are right, a match starts but its 3D picture is wrong
 
 Tested on one PC (Windows 11, GeForce RTX 3070 Ti, 1280x720), with scripted button presses only.
 
@@ -16,10 +16,11 @@ Tested on one PC (Windows 11, GeForce RTX 3070 Ti, 1280x720), with scripted butt
 | Translate `main.rpx` (16,912 functions, 1.41 million instructions; the file has no function names) | works |
 | Build with the runtime | works on Windows (clang, MSYS2) and Linux |
 | Controller notice, title screen, mode select, character select, court select, screen setup, tutorial card | shown |
-| Texts | **faulty**: some letters are missing ("uic  tart" for "Quick Start"), and the text on highlighted buttons is missing |
-| Starting the match | **fails**: the graphics driver reports a device fault (invalid write at address 0) and the program ends |
+| Texts | fixed: all letters and button texts are shown (`patch_dcflush.py`, `patch_rects.py`) |
+| Starting the match | works since `patch_target_remake.py`; the match runs at 60 frames/s with score display |
+| 3D picture in the match | **wrong**: the whole scene is shown rotated by 180 degrees, and the characters are untextured or covered in coloured noise (also on the character select screen). Some of their vertex shaders fail to translate ("ALU clause runs past the end of the program"). Cause not found |
 | Sound | present in a recording of the output (not listened to). Reverb, chorus and delay are not computed |
-| Speed in the menus | the game's 60 frames/s are held; the renderer needs under 2.5 ms per frame on that card |
+| Speed | the game's 60 frames/s are held in menus and match; the renderer needs under 5 ms per frame on that card |
 | Controller, saving, amiibo, online | **not tested** (amiibo and online answer "not available") |
 
 ## What is here
@@ -35,7 +36,15 @@ Wii U runtime by Petexy (MIT). All credit for the recompiler and the runtime goe
   - `patch_threads2.py`, `patch_threads3.py`: a thread that suspends itself waits; a thread resumed by a more
     urgent thread of its core does not run ahead of it (this is not a scheduler);
   - `patch_more_os.py`: the newer sound library names `sndcore2`/`snduser2`, more voice functions, frame heaps;
-  - `patch_fetch_1010102.py`: vertex data format 10_10_10_2 with conversion in the shader translator.
+  - `patch_fetch_1010102.py`: vertex data format 10_10_10_2 with conversion in the shader translator
+    (`patch_fetch_1010102_order.py` adds a run-time switch for the other bit order; which one is right is not known);
+  - `patch_rects.py`, `patch_rects2.py`: the rectangle-list primitive (three vertices, the console adds the fourth).
+    The runtime skipped these draws, 89 of 120 in a menu frame. The translated vertex shader now builds the fourth corner;
+  - `patch_dcflush.py`: `DCFlushRange` tells the renderer that the CPU wrote memory. The game draws each letter into a
+    texture on first use and only flushes the cache, so later letters never appeared;
+  - `patch_target_remake.py`: a render target remade at a smaller size copied its old picture past the new image
+    (the device fault at match start); format 1_5_5_5 no longer needs a Vulkan extension the runtime does not enable;
+  - `patch_vte_off.py`: draws whose vertices are window pixels already (viewport transform off).
 - `port/os_extra.cpp`: system functions other titles need, among them the multi-core task queues (`MP*`; the game
   fills the queue itself and expects `MPRunTasksFromTaskQ` to drain it), unit heaps, the working directory.
 - `port/game_main.cpp`: a game-neutral entry program.
