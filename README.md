@@ -7,7 +7,12 @@ translated to C++ ahead of time and runs on a reimplementation of the Wii U's sy
 > unpacked to `code/`, `content/`, `meta/`. The translated C++ and the program built from it contain the game's
 > code: do not share them. Not affiliated with or endorsed by Nintendo.
 
-## Status (19 November 2026, later): menus are right, a match starts but its 3D picture is wrong
+## Status (19 November 2026, morning): menus and character select are right, the match picture is turned by 180 degrees
+
+**Update of the morning (`port/patch_night4.py`):** the character panels of the select screen are right now. Two causes: the game clears its 16-bit float depth target through a 16-bit depth view of the same memory (the runtime cleared another image, old characters stayed), and the runtime wrote to every bound render target although the lighting shaders output to one (the G-buffer got undefined values, the characters were coloured noise). In a match the scene itself is rendered right (the G-buffer picture is upright, with the right characters); the tone-mapping pass and the anti-aliasing pass each turn the picture by 90 degrees, so the result is upside down. Those two passes draw rectangle lists with the same shaders as the (right) select screen; the cause is not found yet. What looked like "garbage characters" in the match was Mario seen from behind in the turned picture.
+
+The older status below is otherwise unchanged.
+
 
 Tested on one PC (Windows 11, GeForce RTX 3070 Ti, 1280x720), with scripted button presses only.
 
