@@ -7,6 +7,12 @@ translated to C++ ahead of time and runs on a reimplementation of the Wii U's sy
 > unpacked to `code/`, `content/`, `meta/`. The translated C++ and the program built from it contain the game's
 > code: do not share them. Not affiliated with or endorsed by Nintendo.
 
+## Update 22 November 2026, afternoon: right brightness; match turned again on the console
+
+Brightness: same fix as Super Mario 3D World (`port/patch_scan_srgb.py`: the scan buffers are declared sRGB, the frame is linear; the copy now encodes as the console does).
+
+The match picture is upside down again on the small AMD console box although it was upright on the PC; the "fix" below was timing luck. It is reproducible on the PC: written-back render targets delayed by 30 ms (`TTT2_WRITEBACK_DELAY_MS=30`, `port/patch_writeback_delay.py`) or no write-backs at all (`TTT2_NO_WRITEBACK=1`) give the upside-down match. So the title depends on render-target data arriving in guest memory in time; which data and how is still open. A guard that drops write-backs over memory the CPU changed meanwhile (`port/patch_writeback_guard.py`) never triggered, so it is not an overwrite.
+
 ## Update 22 November 2026: the match picture is upright
 
 The 3D scene of a match was drawn upside down (two post-processing passes each turned it by 90 degrees). It is upright now, with the same runtime change that brought Super Mario 3D World to 60 frames a second on a small AMD box: the staging memory the runtime copies small render targets back through is now cached (`port/patch_writeback_cached.py`). A run of the same build with the old, uncached memory showed the match upside down again; with the change it is upright (Windows, RTX 3070 Ti, scripted presses into a match). The tone-map pass's input textures were upright in both cases, so the turn came from data the title reads back; which value exactly is not shown. Not checked: a whole match, a real controller, sound by ear.
