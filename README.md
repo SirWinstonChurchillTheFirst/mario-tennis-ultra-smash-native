@@ -7,6 +7,10 @@ translated to C++ ahead of time and runs on a reimplementation of the Wii U's sy
 > unpacked to `code/`, `content/`, `meta/`. The translated C++ and the program built from it contain the game's
 > code: do not share them. Not affiliated with or endorsed by Nintendo.
 
+## Update 22 November 2026: the match picture is upright
+
+The 3D scene of a match was drawn upside down (two post-processing passes each turned it by 90 degrees). It is upright now, with the same runtime change that brought Super Mario 3D World to 60 frames a second on a small AMD box: the staging memory the runtime copies small render targets back through is now cached (`port/patch_writeback_cached.py`). A run of the same build with the old, uncached memory showed the match upside down again; with the change it is upright (Windows, RTX 3070 Ti, scripted presses into a match). The tone-map pass's input textures were upright in both cases, so the turn came from data the title reads back; which value exactly is not shown. Not checked: a whole match, a real controller, sound by ear.
+
 ## Status (19 November 2026, morning): menus and character select are right, the match picture is turned by 180 degrees
 
 **Update of the morning (`port/patch_night4.py`):** the character panels of the select screen are right now. Two causes: the game clears its 16-bit float depth target through a 16-bit depth view of the same memory (the runtime cleared another image, old characters stayed), and the runtime wrote to every bound render target although the lighting shaders output to one (the G-buffer got undefined values, the characters were coloured noise). In a match the scene itself is rendered right (the G-buffer picture is upright, with the right characters); the tone-mapping pass and the anti-aliasing pass each turn the picture by 90 degrees, so the result is upside down. Those two passes draw rectangle lists with the same shaders as the (right) select screen; the cause is not found yet. What looked like "garbage characters" in the match was Mario seen from behind in the turned picture.
