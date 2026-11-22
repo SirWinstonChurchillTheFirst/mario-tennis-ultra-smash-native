@@ -7,6 +7,10 @@ translated to C++ ahead of time and runs on a reimplementation of the Wii U's sy
 > unpacked to `code/`, `content/`, `meta/`. The translated C++ and the program built from it contain the game's
 > code: do not share them. Not affiliated with or endorsed by Nintendo.
 
+## Update 22 November 2026, 18:50: the match is upright on the console (now the default there)
+
+On the small AMD console box (Radeon Vega, Mesa RADV, 60 Hz TV) the match is upright in two runs (140 s of play), 60 frames/s. Build: the 60 Hz experiments (`patch_snapshot_constants.py`, `patch_swap_retire.py`) OFF by default (`patch_60hz_off.py`; with them on, the console got worse and one 3D World run ended in a GPU device lost), the write-back guard (`patch_writeback_guard.py`) on. Which of these differences rights the picture is not isolated yet.
+
 ## Update 22 November 2026, evening: upright on the PC at 60 frames a second
 
 Two runtime causes, both only at 60 frames a second (a TV) and hidden at 144 Hz by frame interpolation: (1) the GPU read each draw's uniform blocks from guest memory when it executed, after the title had rewritten them for later passes; now they are copied when the draw is recorded (`port/patch_snapshot_constants.py`). (2) At a swap the title went on once the previous frame's GPU work was done but before its small render targets were written back to guest memory; now they are written back first (`port/patch_swap_retire.py`). PC with `TTT2_FPS=60`: upright, 59 frames/s. Not yet tested on the console.

@@ -11,10 +11,12 @@ OUT=/d/retro/wiiurecomp/console/run/$NAME-$TAG; mkdir -p "$OUT"
 mkdir /tmp/wiiu-console-test.lock 2>/dev/null || { echo "stop: another console_test.sh is running (or remove /tmp/wiiu-console-test.lock)"; exit 1; }
 trap 'rmdir /tmp/wiiu-console-test.lock 2>/dev/null' EXIT
 B=/userdata/ports-native/wiiu/$NAME
+# Temperature guard (lost at every reboot): copied up, then a pause (dropbear throttles quick logins).
+scp -q -l 1500 /d/retro/wiiurecomp/tools/tguard.sh $H:/tmp/tguard.sh 2>/dev/null; sleep 11
 run=$(ssh -o ConnectTimeout=10 $H 'curl -s -m 3 localhost:1234/runningGame' 2>/dev/null)
 echo "$run" | grep -q "NO GAME RUNNING\|\"name\": \"Nova Home\"" || { echo "stop: a game is running on the console"; exit 1; }
 ssh $H "rm -rf $B/save-test; mkdir -p $B/save-test; rm -f /tmp/wiiu-*.jpg
-[ -x /tmp/tguard.sh ] && (/tmp/tguard.sh $((SECS+30)) &)
+chmod +x /tmp/tguard.sh 2>/dev/null; [ -x /tmp/tguard.sh ] && (/tmp/tguard.sh $((SECS+30)) &)
 cat > /tmp/wiiutest.env <<EOF
 export CAFE_SAVE_DIR=$B/save-test TTT2_TRACE_PACING=1 TTT2_INPUT_SCRIPT='$INPUT' $EXTRA
 EOF

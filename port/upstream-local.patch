@@ -330,7 +330,7 @@ index 0516e5a..aafd3d3 100644
      while (capacity < wanted) {
          capacity <<= 1;
 diff --git a/runtime/src/gpu/command_processor.cpp b/runtime/src/gpu/command_processor.cpp
-index eff48db..ab4ae44 100644
+index eff48db..d0ff059 100644
 --- a/runtime/src/gpu/command_processor.cpp
 +++ b/runtime/src/gpu/command_processor.cpp
 @@ -183,7 +183,7 @@ void execute(uint32_t address, uint32_t words, int depth);
@@ -370,20 +370,31 @@ index eff48db..ab4ae44 100644
          break;
      }
      case pm4::kMemWrite: {
-@@ -460,6 +467,12 @@ void execute_packet(uint32_t opcode, uint32_t payload, uint32_t count, uint32_t
+@@ -460,6 +467,23 @@ void execute_packet(uint32_t opcode, uint32_t payload, uint32_t count, uint32_t
              if (previous != 0) {
                  g_backend->idle(); // (a held-back submission would never finish)
                  g_backend->wait_for(previous);
 +                // port/patch_swap_retire.py: that frame's write-backs in guest memory before the title goes on.
 +                static const bool retire = [] {
 +                    const char* v = std::getenv("TTT2_SWAP_RETIRE");
-+                    return v == nullptr || *v != '0';
++                    return v != nullptr && (*v == '1' || *v == '2'); // off by default (port/patch_60hz_off.py)
 +                }();
 +                if (retire) g_backend->retired(previous);
++            }
++            { // port/patch_swap_retire2.py
++                static const bool whole = [] {
++                    const char* v = std::getenv("TTT2_SWAP_RETIRE");
++                    return v != nullptr && *v == '2';
++                }();
++                if (whole) {
++                    g_backend->idle();
++                    g_backend->wait_for(done);
++                    g_backend->retired(done);
++                }
              }
              previous = done;
              frame_ready();
-@@ -582,8 +595,10 @@ void command_processor_main() {
+@@ -582,8 +606,10 @@ void command_processor_main() {
              }
              for (const auto& [address, size] : written) g_backend->cpu_wrote(address, size);
          }
@@ -394,7 +405,7 @@ index eff48db..ab4ae44 100644
      }
  }
  
-@@ -626,7 +641,10 @@ uint64_t retired_timestamp() {
+@@ -626,7 +652,10 @@ uint64_t retired_timestamp() {
  
  bool wait_timestamp(uint64_t timestamp, uint64_t timeout_ns) {
      os::KernelLock lock(os::kernel_mutex());
@@ -827,7 +838,7 @@ index 9911027..86300a5 100644
                                 VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT |
                                     VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT);
 diff --git a/runtime/src/gpu/vulkan/interpolate.cpp b/runtime/src/gpu/vulkan/interpolate.cpp
-index 622a213..bb1bbf9 100644
+index 622a213..cdfa605 100644
 --- a/runtime/src/gpu/vulkan/interpolate.cpp
 +++ b/runtime/src/gpu/vulkan/interpolate.cpp
 @@ -201,7 +201,11 @@ void Renderer::init_interpolation() {
@@ -837,7 +848,7 @@ index 622a213..bb1bbf9 100644
 -    if (frames_per_frame_ > 1) {
 +    {
 +        const char* v = std::getenv("TTT2_SNAPSHOT_CONSTANTS");
-+        snapshot_constants_ = frames_per_frame_ == 1 && (v == nullptr || *v != '0'); // port/patch_snapshot_constants.py
++        snapshot_constants_ = frames_per_frame_ == 1 && v != nullptr && *v == '1'; // off by default (port/patch_60hz_off.py) // port/patch_snapshot_constants.py
 +    }
 +    if (frames_per_frame_ > 1 || snapshot_constants_) {
          for (FrameRecord& f : frame_records_) {
@@ -862,11 +873,42 @@ index 622a213..bb1bbf9 100644
  void Renderer::record_constants(uint32_t draw_index, const ConstantSources& sources, abi::DrawConstants& dc) {
      FrameRecord& f = frame_records_[current_record_];
      if (draw_index >= f.draws.size()) return;
+diff --git a/runtime/src/gpu/vulkan/present.cpp b/runtime/src/gpu/vulkan/present.cpp
+index 0778742..c91b088 100644
+--- a/runtime/src/gpu/vulkan/present.cpp
++++ b/runtime/src/gpu/vulkan/present.cpp
+@@ -47,6 +47,17 @@
+ 
+ namespace cafe::gpu::vk {
+ namespace {
++// port/patch_gpu_timeout.py
++uint64_t gpu_timeout_ns() {
++    static const uint64_t ns = [] {
++        const char* v = std::getenv("TTT2_GPU_TIMEOUT_S");
++        const double s = v ? std::atof(v) : 10.0;
++        return static_cast<uint64_t>((s > 0 ? s : 10.0) * 1e9);
++    }();
++    return ns;
++}
++} // namespace
++namespace {
+ 
+ // Enough for every image waiting for its refresh (up to a frame's lead
+ // ahead), the one showing and the one being copied.
+@@ -516,7 +527,7 @@ void Renderer::present_timed(float reported_hz) {
+             wi.semaphoreCount = 1;
+             wi.pSemaphores = &timeline_;
+             wi.pValues = &f.ready;
+-            VK_CHECK(vkWaitSemaphores(ctx_.device, &wi, 10'000'000'000ull));
++            VK_CHECK(vkWaitSemaphores(ctx_.device, &wi, gpu_timeout_ns()));
+         }
+         const double ready_at = now_seconds();
+         // The lead is how long frames take from their swap until the GPU has
 diff --git a/runtime/src/gpu/vulkan/renderer.cpp b/runtime/src/gpu/vulkan/renderer.cpp
-index c70b525..645b4a3 100644
+index c70b525..eb48acc 100644
 --- a/runtime/src/gpu/vulkan/renderer.cpp
 +++ b/runtime/src/gpu/vulkan/renderer.cpp
-@@ -40,6 +40,13 @@ void set_tv_height(uint32_t rows) {
+@@ -40,10 +40,28 @@ void set_tv_height(uint32_t rows) {
  }
  uint32_t tv_height() { return g_tv_height; }
  
@@ -880,7 +922,40 @@ index c70b525..645b4a3 100644
  std::unique_ptr<Backend> make_vulkan_backend() { return std::make_unique<vk::Renderer>(); }
  
  namespace vk {
-@@ -344,12 +351,32 @@ void Renderer::copy_to_scan_buffer(const gx2::ColorBuffer& buffer, uint32_t scan
+ namespace {
++// port/patch_gpu_timeout.py
++uint64_t gpu_timeout_ns() {
++    static const uint64_t ns = [] {
++        const char* v = std::getenv("TTT2_GPU_TIMEOUT_S");
++        const double s = v ? std::atof(v) : 10.0;
++        return static_cast<uint64_t>((s > 0 ? s : 10.0) * 1e9);
++    }();
++    return ns;
++}
++} // namespace
++namespace {
+ 
+ double now_seconds() {
+     return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+@@ -140,7 +158,7 @@ void Renderer::wait_value(uint64_t value, int why) {
+     wi.semaphoreCount = 1;
+     wi.pSemaphores = &timeline_;
+     wi.pValues = &value;
+-    const VkResult r = vkWaitSemaphores(ctx_.device, &wi, 10'000'000'000ull);
++    const VkResult r = vkWaitSemaphores(ctx_.device, &wi, gpu_timeout_ns());
+     if (r != VK_SUCCESS) fatal("Vulkan: the GPU did not finish a submission (%d)", static_cast<int>(r));
+     wait_seconds_ += now_seconds() - begin;
+     ++waits_;
+@@ -204,7 +222,7 @@ void Renderer::wait_for(uint64_t value) {
+     wi.semaphoreCount = 1;
+     wi.pSemaphores = &timeline_;
+     wi.pValues = &value;
+-    const VkResult r = vkWaitSemaphores(ctx_.device, &wi, 10'000'000'000ull);
++    const VkResult r = vkWaitSemaphores(ctx_.device, &wi, gpu_timeout_ns());
+     if (r != VK_SUCCESS) fatal("Vulkan: the GPU did not finish a submission (%d)", static_cast<int>(r));
+ }
+ 
+@@ -344,12 +362,32 @@ void Renderer::copy_to_scan_buffer(const gx2::ColorBuffer& buffer, uint32_t scan
      const uint32_t width = std::min(scaled(buffer.surface.width, t->scale), t->image.width);
      const uint32_t height = std::min(scaled(buffer.surface.height, t->scale), t->image.height);
      Image& scan = scan_[index];
@@ -915,7 +990,7 @@ index c70b525..645b4a3 100644
                              VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                                  VK_IMAGE_USAGE_SAMPLED_BIT,
                              VK_IMAGE_VIEW_TYPE_2D);
-@@ -360,7 +387,17 @@ void Renderer::copy_to_scan_buffer(const gx2::ColorBuffer& buffer, uint32_t scan
+@@ -360,7 +398,17 @@ void Renderer::copy_to_scan_buffer(const gx2::ColorBuffer& buffer, uint32_t scan
      region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
      region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
      region.extent = {width, height, 1};
@@ -934,7 +1009,7 @@ index c70b525..645b4a3 100644
      barrier();
      scan_valid_[index] = true;
      profile_mark("copy to scan buffer", t->address, width, height);
-@@ -377,12 +414,13 @@ void Renderer::save_image(const Image& img, const std::string& path, bool keep_a
+@@ -377,12 +425,13 @@ void Renderer::save_image(const Image& img, const std::string& path, bool keep_a
      // Formats a trace can show: 8-bit, signed 8-bit, 10-bit, half float and
      // depth, decoded to RGBA in [0, 1] (signed and HDR values clamped; the
      // stats line has the real mean and peak).
@@ -949,7 +1024,7 @@ index c70b525..645b4a3 100644
      case VK_FORMAT_R16G16B16A16_SFLOAT: kind = Kind::kHalf; break;
      case VK_FORMAT_R16G16_UNORM: kind = Kind::kRg16; break;
      case VK_FORMAT_R16G16B16A16_SNORM: kind = Kind::kSnorm16; break;
-@@ -429,6 +467,21 @@ void Renderer::save_image(const Image& img, const std::string& path, bool keep_a
+@@ -429,6 +478,21 @@ void Renderer::save_image(const Image& img, const std::string& path, bool keep_a
              c[3] = (w >> 30) / 3.0f;
              break;
          }
@@ -995,13 +1070,14 @@ index 6739e5d..ba9dee8 100644
      bool replaying_ = false;
      bool replayed_ = false; // this frame's extra frames were rendered
 diff --git a/runtime/src/gpu/vulkan/targets.cpp b/runtime/src/gpu/vulkan/targets.cpp
-index 5bd50e6..00772b5 100644
+index 5bd50e6..664ad5f 100644
 --- a/runtime/src/gpu/vulkan/targets.cpp
 +++ b/runtime/src/gpu/vulkan/targets.cpp
-@@ -10,7 +10,12 @@
+@@ -10,7 +10,13 @@
  
  #include "cafe/runtime.h"
  
++#include <string>
 +#include <chrono>
 +#include <thread>
 +#include <atomic>
@@ -1011,7 +1087,7 @@ index 5bd50e6..00772b5 100644
  #include <cstdio>
  #include <cstdlib>
  #include <cstring>
-@@ -181,8 +186,13 @@ void Renderer::refit_target(Target& t, float scale, uint32_t min_width, uint32_t
+@@ -181,8 +187,13 @@ void Renderer::refit_target(Target& t, float scale, uint32_t min_width, uint32_t
      barrier();
      VkImageBlit blit{};
      blit.srcSubresource = blit.dstSubresource = {old.aspect, 0, 0, 1};
@@ -1027,7 +1103,7 @@ index 5bd50e6..00772b5 100644
      vkCmdBlitImage(cmd(), old.image, VK_IMAGE_LAYOUT_GENERAL, t.image.image, VK_IMAGE_LAYOUT_GENERAL, 1, &blit,
                     t.depth || scale == t.scale ? VK_FILTER_NEAREST : VK_FILTER_LINEAR);
      barrier();
-@@ -245,6 +255,44 @@ void Renderer::clear_depth_stencil(const Registers&, const gx2::DepthBuffer& buf
+@@ -245,6 +256,44 @@ void Renderer::clear_depth_stencil(const Registers&, const gx2::DepthBuffer& buf
      profile_mark("clear depth", t->address, t->image.width, t->image.height);
      t->written = stamp();
      note_target_written(t);
@@ -1072,7 +1148,7 @@ index 5bd50e6..00772b5 100644
      if (tracing()) {
          std::fprintf(stderr, "trace: clear depth 0x%08X fmt 0x%03X %ux%u flags %u (%g, %u)\n", t->address, t->format,
                       t->pitch, t->height, flags, depth, stencil);
-@@ -420,6 +468,18 @@ void Renderer::convert_depth(const gx2::DepthBuffer& src, const gx2::Surface& ds
+@@ -420,6 +469,18 @@ void Renderer::convert_depth(const gx2::DepthBuffer& src, const gx2::Surface& ds
  // ------------------------------------------------------------ write-back
  
  void Renderer::queue_write_back(Target* t) {
@@ -1091,7 +1167,7 @@ index 5bd50e6..00772b5 100644
      if (!t->write_back || replaying_ || t->write_back_queued) return;
      t->write_back_queued = true;
      write_back_targets_.push_back(t);
-@@ -438,9 +498,20 @@ void Renderer::copy_write_backs() {
+@@ -438,9 +499,20 @@ void Renderer::copy_write_backs() {
          if (!guest_memory_committed(t->address, t->pitch * t->height * bytes)) continue;
          if (write_back_free_.empty()) {
              write_back_free_.push_back(static_cast<uint32_t>(write_back_staging_.size()));
@@ -1115,7 +1191,7 @@ index 5bd50e6..00772b5 100644
          }
          const uint32_t staging = write_back_free_.back();
          write_back_free_.pop_back();
-@@ -449,7 +520,21 @@ void Renderer::copy_write_backs() {
+@@ -449,7 +521,21 @@ void Renderer::copy_write_backs() {
          region.imageExtent = {t->pitch, t->height, 1};
          vkCmdCopyImageToBuffer(cmd(), t->image.image, VK_IMAGE_LAYOUT_GENERAL, write_back_staging_[staging].buffer, 1,
                                 &region);
@@ -1138,7 +1214,7 @@ index 5bd50e6..00772b5 100644
          if (tracing()) {
              std::fprintf(stderr, "trace: write back 0x%08X fmt 0x%03X %ux%u tile %u\n", t->address, t->format, t->pitch,
                           t->height, t->tile_mode);
-@@ -472,6 +557,19 @@ void Renderer::copy_write_backs() {
+@@ -472,6 +558,19 @@ void Renderer::copy_write_backs() {
  // (Retirement thread.) The copies of the submissions up to `value`, tiled
  // into guest memory.
  void Renderer::retired(uint64_t value) {
@@ -1158,7 +1234,7 @@ index 5bd50e6..00772b5 100644
      for (;;) {
          WriteBack w;
          const uint8_t* data;
-@@ -482,6 +580,19 @@ void Renderer::retired(uint64_t value) {
+@@ -482,6 +581,39 @@ void Renderer::retired(uint64_t value) {
              write_backs_.pop_front();
              data = write_back_staging_[w.staging].mapped;
          }
@@ -1175,10 +1251,30 @@ index 5bd50e6..00772b5 100644
 +            write_back_free_.push_back(w.staging);
 +            continue;
 +        }
++        { // port/patch_dump_wb.py
++            static const double dump_at = [] {
++                const char* v = std::getenv("TTT2_DUMP_WB");
++                return v ? std::atof(v) : -1.0;
++            }();
++            static const auto started = std::chrono::steady_clock::now();
++            static std::set<uint32_t> dumped;
++            const char* dir = std::getenv("TTT2_CAPTURE");
++            if (dump_at >= 0 && dir != nullptr &&
++                std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count() >= dump_at &&
++                dumped.insert(w.address).second) {
++                char name[96];
++                std::snprintf(name, sizeof(name), "/wb_%08X_%ux%u_%u.bin", w.address, w.pitch, w.height, w.bpp);
++                if (FILE* f = std::fopen((std::string(dir) + name).c_str(), "wb")) {
++                    std::fwrite(data, 1, size_t{w.pitch} * w.height * (w.bpp / 8), f);
++                    std::fclose(f);
++                    std::fprintf(stderr, "ttt2: dumped write-back %s\n", name);
++                }
++            }
++        }
          TiledLevel level{};
          level.data = guest_pointer(w.address);
          level.base256b = w.base_reg;
-@@ -492,8 +603,15 @@ void Renderer::retired(uint64_t value) {
+@@ -492,8 +624,15 @@ void Renderer::retired(uint64_t value) {
          level.slices = 1;
          level.samples = 1;
          tile(level, w.pitch, w.height, 0, 1, data);
