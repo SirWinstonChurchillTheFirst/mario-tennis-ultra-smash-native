@@ -7,6 +7,10 @@ translated to C++ ahead of time and runs on a reimplementation of the Wii U's sy
 > unpacked to `code/`, `content/`, `meta/`. The translated C++ and the program built from it contain the game's
 > code: do not share them. Not affiliated with or endorsed by Nintendo.
 
+## Update 22 November 2026, evening: upright on the PC at 60 frames a second
+
+Two runtime causes, both only at 60 frames a second (a TV) and hidden at 144 Hz by frame interpolation: (1) the GPU read each draw's uniform blocks from guest memory when it executed, after the title had rewritten them for later passes; now they are copied when the draw is recorded (`port/patch_snapshot_constants.py`). (2) At a swap the title went on once the previous frame's GPU work was done but before its small render targets were written back to guest memory; now they are written back first (`port/patch_swap_retire.py`). PC with `TTT2_FPS=60`: upright, 59 frames/s. Not yet tested on the console.
+
 ## Update 22 November 2026, afternoon: right brightness; match turned again on the console
 
 Brightness: same fix as Super Mario 3D World (`port/patch_scan_srgb.py`: the scan buffers are declared sRGB, the frame is linear; the copy now encodes as the console does).
